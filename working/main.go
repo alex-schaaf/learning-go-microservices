@@ -1,28 +1,47 @@
 package main
 
 import (
-	"fmt"
-	"io/ioutil"
+	"context"
 	"log"
 	"net/http"
+	"os"
+	"os/signal"
+	"time"
+
+	"github.com/alex-schaaf/learning-go-microservices/working/handlers"
 )
 
 func main() {
-	// greedy matching, anything /... that's not registered to another HandeFunc
-	// will execute
-	http.HandleFunc("/", handleRoot)
-	// bind server to every ip address at given port
-	http.ListenAndServe(":9090", nil)
-}
+	l := log.New(os.Stdout, "product-api", log.LstdFlags)
+	hh := handlers.NewHello(l)
+	gh := handlers.NewGoodbye(l)
 
-func handleRoot(rw http.ResponseWriter, r *http.Request) {
-	log.Println("Hello World!")
-	// read in http request body
-	d, err := ioutil.ReadAll(r.Body)
-	if err != nil {
-		http.Error(rw, "Ooops.", http.StatusBadRequest)
-		return
+	sm := http.NewServeMux()
+	sm.Handle("/", hh)
+	sm.Handle("/goodbye", gh)
+
+	s := &http.Server{
+		Addr:         ":9090",
+		Handler:      sm,
+		IdleTimeout:  120 * time.Second,
+		ReadTimeout:  1 * time.Second,
+		WriteTimeout: 1 * time.Second,
 	}
 
-	fmt.Fprintf(rw, "Hello, %s", d)
+	go func() {
+		err := s.ListenAndServe()
+		if err != nil {
+			l.Fatal(err)
+		}
+	}()
+
+	signalChannel := make(chan os.Signal)
+	signal.Notify(signalChannel, os.Interrupt)
+	signal.Notify(signalChannel, os.Kill)
+
+	sig := <-signalChannel
+	l.Println("Recieved terminate, graceful shutdown", sig)
+
+	tc, _ := context.WithTimeout(context.Background(), 30*time.Second)
+	s.Shutdown(tc)
 }
